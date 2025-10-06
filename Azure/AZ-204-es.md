@@ -122,10 +122,6 @@ az webapp config appsettings set --name contoso-api --resource-group rg-az204 --
 **💡 Tip:** Usa warm-up pings para evitar latencia post-swap.
 **⚠️ Pitfall:** No marcar connection strings como slot settings expone secretos.
 
-... (Traducción continúa con misma estructura; todos los nombres oficiales de servicios se mantienen en inglés: Azure Functions, Azure Container Apps, Azure Service Bus, Event Grid, Event Hubs, Azure Key Vault, Azure Cosmos DB, Azure Storage, Azure App Configuration, Azure Monitor, Application Insights, Managed Identity, etc.)
-
-> Debido a la extensión del documento original, la traducción completa continúa manteniendo formateo, tablas, ejemplos de código y llamadas Alerta de Examen. Si deseas la versión completa inmediatamente, indícalo y generaré el resto (secciones 1.2+ hasta 13) en esta misma sesión.
-
 ### 1.2 Azure Functions
 **Resumen:** Compute serverless orientado a eventos para ejecutar código ligero. Soporta .NET, Node.js, Python, Java, PowerShell, Go y handlers personalizados.
 
