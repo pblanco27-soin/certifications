@@ -448,14 +448,50 @@ az storage blob generate-sas \
 | Pedidos e-commerce | /customerId | Consultas frecuentes por cliente |
 | Sesiones juego | /gameSessionId | Aísla estado de sesión |
 
-**Malas Elecciones**
-- Baja cardinalidad (/region con 3 valores) -> hotspot.
-- Sesgo alto (un tenant domina).
+**¿Qué es un RU (Request Unit)?**
+Un RU es la moneda de rendimiento de Cosmos DB: cada operación (lectura, escritura, consulta, upsert) consume una cantidad de Request Units proporcional a CPU, IO y complejidad de indexación. Tú aprovisionas (o usas autoscale) un presupuesto de RU/s por contenedor o base de datos. Si el consumo instantáneo excede el presupuesto, recibes código 429 (Request Rate Too Large) con un encabezado `x-ms-retry-after-ms` recomendando espera.
 
-**Optimización RU**
-- Proyectar solo campos requeridos.
-- Evitar SELECT * en paths críticos.
-- Usar filtros partición para prevenir fan-out.
+Ejemplos típicos (aprox, pueden variar por tamaño de documento e índice):
+- Lectura punto (Read Item con id + partition key, doc pequeño ~1KB): ~1 RU
+- Escritura (Insert/Upsert 1KB): ~5 RU (más si habilitas índices complejos o TTL)
+- Consulta filtrada dentro de una partición retornando pocos documentos: 2-5 RU
+- Consulta cross-partition con fan-out y agregaciones: 10s–100s RU según volumen
+- Operación de cambio de throughput (manual) o mantenimientos internos: 0 RU (administrativo)
+
+Cómo se ve afectado el costo:
+- Tamaño de documento: documentos más grandes cuestan más RU en lecturas/escrituras.
+- Índices: cada path indexado agrega trabajo en escrituras (más RU). Desindexar campos no consultados ahorra RU.
+- Fan-out: consultas que no fijan la clave de partición se disparan a todas las particiones → suma de RU parciales.
+- Proyección: devolver solo campos necesarios reduce bytes transferidos y costo.
+
+**Malas Elecciones de Clave de Partición (y por qué)**
+- Baja cardinalidad (ej: /region con solo 3 valores) → Crea pocas particiones lógicas y concentra todo el tráfico en ellas generando hotspots; reduce paralelismo y escala horizontal.
+- Sesgo alto (un tenant domina el 70% del tráfico) → Esa partición alcanza el límite de RU/s mientras otras quedan infrautilizadas; provoca throttling (429) prematuro.
+- Propiedad mutable (ej: /status que cambia a lo largo del ciclo de vida) → No puedes cambiar la partition key de un documento; obliga a reinsertar en nuevo contenedor para "migrar".
+- Valores crecientes monotónicos (ej: /timestamp redondeado a minuto) → Los inserts entran secuencialmente en una sola partición generando cola y latencia.
+- Demasiada cardinalidad sin agrupación lógica (ej: /uuid aleatorio cuando consultas por usuario) → Pierdes afinidad de consultas; cada query hace fan-out innecesario.
+
+Estrategias para corregir un mal diseño:
+- Re-modelar datos y crear nuevo contenedor con clave adecuada; migrar con Change Feed.
+- Introducir clave compuesta sintética (ej: `${tenantId}|${yyyyMM}`) para balance temporal + afinidad de tenant.
+- Usar materialización denormalizada para queries de acceso frecuente dentro de una partición.
+
+**Optimización de Consumo de RU (Práctico)**
+- Proyectar solo campos requeridos (`SELECT c.id, c.status`) en lugar de `SELECT *` para reducir RU y ancho de banda.
+- Incluir SIEMPRE la clave de partición en las lecturas punto y queries; si no, fan-out.
+- Crear índices personalizados: excluir paths no consultados (`"excludedPaths"`) para abaratar escrituras masivas.
+- Pre-agregar (pre-compute) métricas que consultas repetidamente en vez de agregar sobre millones de documentos cada vez.
+- Usar TTL para purgar datos fríos y reducir tamaño total (consultas más baratas; menos RU por escaneo de índice).
+- Configurar Autoscale si la carga es elástica (ahorra costo sobre aprovisionar RU/s altos 24x7).
+- Cache de lectura (ej: Redis) para patrones hot de baja mutación y así reducir read RU.
+- Change Feed + proyección incremental: generar vistas materializadas optimizadas para queries de dashboard.
+
+Métricas a vigilar (Azure Monitor / Insights):
+- Total Request Units y Normalized RU Consumption: picos cercanos al 100% señalan necesidad de más throughput o mejor partición.
+- Throttled Requests (429) count: si persiste, re-evaluar clave o aumentar RU/s.
+- Index Transformation Progress: cambios de política de indexación pueden temporalmente elevar RU.
+
+Alerta de Examen: Preguntas suelen darte un patrón de acceso (ej: filtrar por tenant y fecha) — la mejor clave es la que equilibra distribución + coincide con el filtro más frecuente evitando fan-out.
 
 ---
 
